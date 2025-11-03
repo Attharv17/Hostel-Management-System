@@ -10,12 +10,15 @@ import java.time.LocalDate;
 
 /**
  * The main student dashboard.
- * Now fully functional, writing data to the database.
+ * Now fully functional, writing data to the database, and showing the food wastage banner.
  */
 public class DashboardPanel extends JPanel {
 
     private Hostel hostel;
     private Student loggedInStudent;
+
+    // --- Banner for Food Wastage ---
+    private JLabel bannerLabel;
 
     // UI Components for Mess Panel
     private JCheckBox messCheckBox;
@@ -32,7 +35,7 @@ public class DashboardPanel extends JPanel {
     private JButton leaveSubmitButton;
     private DefaultTableModel leaveHistoryModel;
 
-    // --- NEW: UI Components for Outpass Panel ---
+    // UI Components for Outpass Panel
     private JTextField outpassDateField;
     private JTextField timeOutField;
     private JTextField timeInField;
@@ -56,6 +59,10 @@ public class DashboardPanel extends JPanel {
         setBorder(new EmptyBorder(15, 15, 15, 15));
         setBackground(new Color(245, 247, 250)); // Light background
 
+        // --- Add Food Wastage Banner to the top ---
+        bannerLabel = createBannerLabel();
+        add(bannerLabel, BorderLayout.NORTH);
+
         // 2x2 Grid for the main content
         JPanel quadrantPanel = new JPanel(new GridLayout(2, 2, 15, 15));
         quadrantPanel.setOpaque(false);
@@ -64,27 +71,104 @@ public class DashboardPanel extends JPanel {
         quadrantPanel.add(createCleaningStatusPanel());
         quadrantPanel.add(createLeaveApplicationPanel());
 
-        // --- UPDATED: Replaced Future Availability with Outpass ---
+        // Replaced Future Availability with Outpass
         quadrantPanel.add(createOutpassPanel());
 
         add(quadrantPanel, BorderLayout.CENTER);
 
-        // --- NEW: Add history panel at the bottom ---
+        // Add history panel at the bottom
         add(createHistoryPanel(), BorderLayout.SOUTH);
 
         // Initial check to see if student has already submitted today
         refreshDashboard();
     }
 
-    // Refreshes the state of buttons based on DB
+    /**
+     * Refreshes the state of buttons and banner based on DB
+     */
     public void refreshDashboard() {
+        updateBanner(); // Load and display food wastage
         checkMessSubmissionStatus();
         checkCleaningSubmissionStatus();
         loadLeaveHistory();
         loadOutpassHistory();
     }
 
-    // --- Mess Panel (Unchanged) ---
+    // --- Banner Methods ---
+
+    /**
+     * Creates the banner label, initially empty.
+     */
+    private JLabel createBannerLabel() {
+        JLabel label = new JLabel("Loading food wastage data...", SwingConstants.CENTER);
+        label.setOpaque(true);
+        label.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        label.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        return label;
+    }
+
+    /**
+     * Fetches wastage data from DB and updates the banner.
+     */
+    private void updateBanner() {
+        double thisMonth = 0.0;
+        double lastMonth = 0.0;
+
+        String sql = "SELECT metric_key, metric_value FROM hostel_metrics WHERE metric_key IN ('this_month_wastage', 'last_month_wastage')";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                if (rs.getString("metric_key").equals("this_month_wastage")) {
+                    thisMonth = rs.getDouble("metric_value");
+                } else if (rs.getString("metric_key").equals("last_month_wastage")) {
+                    lastMonth = rs.getDouble("metric_value");
+                }
+            }
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            bannerLabel.setText("Could not load food wastage data.");
+            bannerLabel.setBackground(new Color(240, 240, 240));
+            bannerLabel.setForeground(Color.RED);
+            return;
+        }
+
+        // Now, format the banner text
+        String trendText;
+        Color trendColor;
+        Color bgColor;
+
+        double percentChange = 0.0;
+        if (lastMonth > 0) {
+            percentChange = ((thisMonth - lastMonth) / lastMonth) * 100.0;
+        } else if (thisMonth > 0) {
+            percentChange = 100.0; // From 0 to >0 is 100% increase
+        }
+
+        if (percentChange > 0) {
+            trendText = String.format("↑ %.1f%% more than last month. Let's improve!", percentChange);
+            trendColor = new Color(192, 57, 43); // Red
+            bgColor = new Color(255, 240, 240);
+        } else if (percentChange < 0) {
+            trendText = String.format("↓ %.1f%% less than last month. Let's aim lower!", Math.abs(percentChange));
+            trendColor = new Color(39, 174, 96); // Green
+            bgColor = new Color(235, 255, 240);
+        } else {
+            trendText = "Same as last month.";
+            trendColor = new Color(52, 73, 94); // Dark blue/grey
+            bgColor = new Color(245, 245, 245);
+        }
+
+        bannerLabel.setText(String.format("This month's food wastage: %.1f kg — %s", thisMonth, trendText));
+        bannerLabel.setForeground(trendColor);
+        bannerLabel.setBackground(bgColor);
+    }
+
+
+    // --- Mess Panel ---
+
     private JPanel createMessPanel() {
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
@@ -162,7 +246,8 @@ public class DashboardPanel extends JPanel {
         }
     }
 
-    // --- Cleaning Panel (Unchanged) ---
+    // --- Cleaning Panel ---
+
     private JPanel createCleaningStatusPanel() {
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
@@ -238,7 +323,7 @@ public class DashboardPanel extends JPanel {
         }
     }
 
-    // --- Leave Application Panel (LAYOUT UPDATED) ---
+    // --- Leave Application Panel ---
 
     private JPanel createLeaveApplicationPanel() {
         JPanel content = new JPanel(new BorderLayout(10, 10));
@@ -255,31 +340,29 @@ public class DashboardPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.EAST;
         formPanel.add(new JLabel("Start Date (YYYY-MM-DD):"), gbc);
         gbc.gridx = 1; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
-        // --- FIELD SIZE INCREASED ---
-        leaveStartDateField = new JTextField(20); // Was 15
+        leaveStartDateField = new JTextField(20);
         formPanel.add(leaveStartDateField, gbc);
 
         // End Date
         gbc.gridx = 0; gbc.gridy = 1; gbc.anchor = GridBagConstraints.EAST;
         formPanel.add(new JLabel("End Date (YYYY-MM-DD):"), gbc);
         gbc.gridx = 1; gbc.gridy = 1; gbc.anchor = GridBagConstraints.WEST;
-        // --- FIELD SIZE INCREASED ---
-        leaveEndDateField = new JTextField(20); // Was 15
+        leaveEndDateField = new JTextField(20);
         formPanel.add(leaveEndDateField, gbc);
 
         // Reason
         gbc.gridx = 0; gbc.gridy = 2; gbc.anchor = GridBagConstraints.NORTHEAST;
         formPanel.add(new JLabel("Reason:"), gbc);
         gbc.gridx = 1; gbc.gridy = 2; gbc.fill = GridBagConstraints.BOTH; gbc.weightx = 1.0; gbc.weighty = 1.0;
-        leaveReasonArea = new JTextArea(4, 20); // Rows/cols don't matter as much in JScrollPane
+        leaveReasonArea = new JTextArea(4, 20);
         leaveReasonArea.setLineWrap(true);
         leaveReasonArea.setWrapStyleWord(true);
         JScrollPane reasonScrollPane = new JScrollPane(leaveReasonArea);
         formPanel.add(reasonScrollPane, gbc);
 
-        // --- NEW: Wrap form in a JScrollPane to prevent hiding fields ---
+        // Wrap form in a JScrollPane to prevent hiding fields
         JScrollPane formScrollPane = new JScrollPane(formPanel);
-        formScrollPane.setBorder(BorderFactory.createEmptyBorder()); // Remove ugly border
+        formScrollPane.setBorder(BorderFactory.createEmptyBorder());
         content.add(formScrollPane, BorderLayout.CENTER);
 
         leaveSubmitButton = new JButton("Submit Leave Request");
@@ -341,7 +424,7 @@ public class DashboardPanel extends JPanel {
         }
     }
 
-    // --- Outpass Panel (LAYOUT UPDATED) ---
+    // --- Outpass Panel ---
 
     private JPanel createOutpassPanel() {
         JPanel content = new JPanel(new BorderLayout(10, 10));
@@ -349,7 +432,7 @@ public class DashboardPanel extends JPanel {
 
         JPanel formPanel = new JPanel(new GridBagLayout());
         formPanel.setOpaque(false);
-        formPanel.setBorder(new EmptyBorder(5, 5, 5, 5)); // Add padding
+        formPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(4, 4, 4, 4);
         gbc.fill = GridBagConstraints.HORIZONTAL;
@@ -358,24 +441,21 @@ public class DashboardPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.EAST;
         formPanel.add(new JLabel("Date (YYYY-MM-DD):"), gbc);
         gbc.gridx = 1; gbc.gridy = 0; gbc.anchor = GridBagConstraints.WEST;
-        // --- FIELD SIZE INCREASED ---
-        outpassDateField = new JTextField(20); // Was 15
+        outpassDateField = new JTextField(20);
         formPanel.add(outpassDateField, gbc);
 
         // Time Out
         gbc.gridx = 0; gbc.gridy = 1; gbc.anchor = GridBagConstraints.EAST;
         formPanel.add(new JLabel("Time Out (HH:MM):"), gbc);
         gbc.gridx = 1; gbc.gridy = 1; gbc.anchor = GridBagConstraints.WEST;
-        // --- FIELD SIZE INCREASED ---
-        timeOutField = new JTextField(20); // Was 15
+        timeOutField = new JTextField(20);
         formPanel.add(timeOutField, gbc);
 
         // Time In
         gbc.gridx = 0; gbc.gridy = 2; gbc.anchor = GridBagConstraints.EAST;
         formPanel.add(new JLabel("Time In (HH:MM):"), gbc);
         gbc.gridx = 1; gbc.gridy = 2; gbc.anchor = GridBagConstraints.WEST;
-        // --- FIELD SIZE INCREASED ---
-        timeInField = new JTextField(20); // Was 15
+        timeInField = new JTextField(20);
         formPanel.add(timeInField, gbc);
 
         // Reason
@@ -388,9 +468,9 @@ public class DashboardPanel extends JPanel {
         JScrollPane reasonScrollPane = new JScrollPane(outpassReasonArea);
         formPanel.add(reasonScrollPane, gbc);
 
-        // --- NEW: Wrap form in a JScrollPane to prevent hiding fields ---
+        // Wrap form in a JScrollPane to prevent hiding fields
         JScrollPane formScrollPane = new JScrollPane(formPanel);
-        formScrollPane.setBorder(BorderFactory.createEmptyBorder()); // Remove ugly border
+        formScrollPane.setBorder(BorderFactory.createEmptyBorder());
         content.add(formScrollPane, BorderLayout.CENTER);
 
         outpassSubmitButton = new JButton("Submit Outpass Request");
@@ -450,7 +530,7 @@ public class DashboardPanel extends JPanel {
     }
 
 
-    // --- History Panel (LAYOUT UPDATED) ---
+    // --- History Panel ---
 
     private JPanel createHistoryPanel() {
         JPanel panel = new JPanel(new BorderLayout());
@@ -478,8 +558,8 @@ public class DashboardPanel extends JPanel {
 
         panel.add(historyTabs, BorderLayout.CENTER);
 
-        // --- PREFERRED HEIGHT DECREASED ---
-        panel.setPreferredSize(new Dimension(800, 180)); // Was 200
+        // Reduced height
+        panel.setPreferredSize(new Dimension(800, 180));
 
         return panel;
     }
@@ -531,7 +611,7 @@ public class DashboardPanel extends JPanel {
         }
     }
 
-    // --- Utility Methods (Unchanged) ---
+    // --- Utility Methods ---
 
     private JPanel createCardPanel(String title, String iconText, JPanel contentPanel) {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
@@ -574,7 +654,6 @@ public class DashboardPanel extends JPanel {
                 }
                 public void mouseExited(java.awt.event.MouseEvent evt) {
                     button.setBackground(originalColor);
-
                 }
             });
         }
